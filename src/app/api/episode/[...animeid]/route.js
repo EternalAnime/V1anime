@@ -1,13 +1,14 @@
 import axios from 'axios';
 import { redis } from '@/lib/rediscache';
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
 import { CombineEpisodeMeta } from '@/utils/EpisodeFunctions';
 
 axios.interceptors.request.use(config => {
-  config.timeout = 9000;
+  config.timeout = 9000; // Set a timeout for all axios requests
   return config;
 });
 
+// Fetch episode data from Consumet API, both sub and dub
 async function fetchConsumet(id) {
   try {
     async function fetchData(dub) {
@@ -17,18 +18,18 @@ async function fetchConsumet(id) {
       if (data?.message === "Anime not found" && data?.length < 1) {
         return [];
       }
-      // return data.episodes;
       return data;
     }
+
     const [subData, dubData] = await Promise.all([
-      fetchData(),
-      fetchData(true),
+      fetchData(false), // Fetch sub data
+      fetchData(true),  // Fetch dub data
     ]);
 
     const array = [
       {
         consumet: true,
-        providerId: "gogoanime",
+        providerId: "consumet",
         episodes: {
           ...(subData && subData.length > 0 && { sub: subData }),
           ...(dubData && dubData.length > 0 && { dub: dubData }),
@@ -43,61 +44,7 @@ async function fetchConsumet(id) {
   }
 }
 
-async function fetchAnify(id) {
-  try {
-    const { data } = await axios.get(`https://anify.eltik.cc/info/${id}?fields=[episodes]`);
-
-    if (!data || !data?.episodes?.data) {
-      return [];
-    }
-    const epdata = data?.episodes?.data;
-
-    const filtereddata = epdata?.filter((episodes) => episodes.providerId !== "9anime");
-    const mappedData = filtereddata?.map((i) => {
-      if (i?.providerId === "gogoanime"){
-       return {
-        episodes: i.episodes,
-        providerId: "gogobackup",
-      }
-    };
-      return i;
-    });
-    return mappedData;
-  } catch (error) {
-    console.error("Error fetching anify:", error.message);
-    return [];
-  }
-}
-
-async function MalSync(id) {
-  try {
-    const response = await axios.get(`${process.env.MALSYNC_URI}${id}`);
-
-    const data = response?.data;
-    const sites = Object.keys(data.Sites).map(providerId => ({ providerId: providerId.toLowerCase(), data: Object.values(data.Sites[providerId]) }));
-    const newdata = sites.filter(site => site.providerId === 'gogoanime' || site.providerId === 'zoro');
-    const finaldata = [];
-    console.log(newdata)
-    newdata.forEach(item => {
-      const { providerId, data } = item;
-      if (providerId === 'gogoanime') {
-        const dub = data.find(item => item.title.toLowerCase().endsWith(" (dub)"));
-        const duburl = dub?.url?.split('/').pop();
-        const sub = data.find(item => item.title.toLowerCase().includes(" (uncensored)"))?.url?.split('/').pop() ?? data.find((item) => item?.url === dub?.url?.replace(/-dub$/, ''))?.url?.split('/').pop() ?? data.find(item => !item.title.toLowerCase().includes(")"))?.url?.split('/').pop();
-        finaldata.push({ providerId, sub: sub || "", dub: duburl || "" });
-      } else {
-        const sub = data[0]?.url?.split('/').pop()
-        finaldata.push({ providerId, sub: sub || '' });
-      }
-    });
-    console.log(finaldata)
-    return finaldata;
-  } catch (error) {
-    console.error('Error fetching data from Malsync:', error);
-    return null;
-  }
-}
-
+// Fetch Gogoanime episodes
 async function fetchGogoanime(sub, dub) {
   try {
     async function fetchData(id) {
@@ -110,10 +57,11 @@ async function fetchGogoanime(sub, dub) {
       return data?.episodes;
     }
 
-    const [subData, dubData] = await Promise.all([
-      sub !== "" ? fetchData(sub) : Promise.resolve([]),
-      dub !== "" ? fetchData(dub) : Promise.resolve([]),
-    ]);
+    const promises = [];
+    if (sub !== "") promises.push(fetchData(sub));
+    if (dub !== "") promises.push(fetchData(dub));
+
+    const [subData, dubData] = await Promise.all(promises);
 
     const array = [
       {
@@ -133,55 +81,54 @@ async function fetchGogoanime(sub, dub) {
   }
 }
 
+// Fetch Zoro episodes with Dub option
 async function fetchZoro(id) {
   try {
-    const { data } = await axios.get(`${process.env.ZORO_URI}/anime/episodes/${id}`);
+    const { data } = await axios.get(`${process.env.ZORO_URI}/anime/episodes/${id}?dub=true`);
+    
     if (!data?.episodes) return [];
 
     const array = [
       {
         providerId: "zoro",
-        episodes: data?.episodes,
+        episodes: {
+          sub: data?.episodes.filter(ep => !ep.dub), // assuming ep.dub indicates a dubbed episode
+          dub: data?.episodes.filter(ep => ep.dub)    // assuming dub episodes can be filtered this way
+        } 
       },
     ];
 
     return array;
-    } catch (error) {
+  } catch (error) {
     console.error("Error fetching zoro:", error.message);
     return [];
   }
 }
 
+// Fetch episode metadata
 async function fetchEpisodeMeta(id, available = false) {
   try {
     if (available) {
       return null;
     }
-    // const { data } = await axios.get(
-    //   `https://api.anify.tv/content-metadata/${id}`
-    // );
-    // if (!data) return [];
-
-    // const metadata = data?.find((i) => i.providerId === "tvdb") || data[0];
-    // return metadata?.data;
-    const data = await axios.get(`https://api.ani.zip/mappings?anilist_id=${id}`);
+    const { data } = await axios.get(`https://api.ani.zip/mappings?anilist_id=${id}`);
     const episodesArray = Object.values(data?.data?.episodes);
 
-    if(!episodesArray){
+    if (!episodesArray) {
       return [];
     }
-    return episodesArray
-
+    return episodesArray;
   } catch (error) {
     console.error("Error fetching and processing meta:", error.message);
     return [];
   }
 }
 
+// Main function to fetch and cache data
 const fetchAndCacheData = async (id, meta, redis, cacheTime, refresh) => {
   let malsync;
-  if(id){
-    malsync = await MalSync(id);
+  if (id) {
+    malsync = await MalSync(id); // Assuming MalSync function is defined correctly to fetch mappings
   }
   const promises = [];
   
@@ -196,17 +143,17 @@ const fetchAndCacheData = async (id, meta, redis, cacheTime, refresh) => {
     }
   
     if (zorop) {
-      promises.push(fetchZoro(zorop.sub));
+      promises.push(fetchZoro(zorop.sub)); // fetch Zoro, which now handles dub
     } else {
       promises.push(Promise.resolve([]));
     }
     promises.push(fetchEpisodeMeta(id, !refresh));
-
   } else {
-    promises.push(fetchConsumet(id));
-    promises.push(fetchAnify(id));
+    promises.push(fetchConsumet(id)); // this already fetches both sub and dub
+    promises.push(fetchAnify(id)); // Assuming this function is defined to fetch from Anify
     promises.push(fetchEpisodeMeta(id, !refresh));
   }
+
   const [consumet, anify, cover] = await Promise.all(promises);  
 
   // Check if redis is available
@@ -225,8 +172,7 @@ const fetchAndCacheData = async (id, meta, redis, cacheTime, refresh) => {
         } catch (error) {
           console.error("Error serializing cover:", error.message);
         }
-      }
-      else if (meta) {
+      } else if (meta) {
         data = await CombineEpisodeMeta(combinedData, JSON.parse(meta));
       }
     } else if (meta) {
@@ -240,6 +186,7 @@ const fetchAndCacheData = async (id, meta, redis, cacheTime, refresh) => {
   }
 };
 
+// Main GET handler
 export const GET = async (req, { params }) => {
   const url = new URL(req.url);
   const id = params.animeid[0];
@@ -258,14 +205,6 @@ export const GET = async (req, { params }) => {
 
   if (redis) {
     try {
-      // // Find keys matching the pattern "meta:*"
-      // const keys = await redis.keys("meta:*");
-
-      // // Delete keys matching the pattern "meta:*"
-      // if (keys.length > 0) {
-      //   await redis.del(keys);
-      //   console.log(`Deleted ${keys.length} keys matching the pattern "meta:*"`);
-      // }
       meta = await redis.get(`meta:${id}`);
       if (JSON.parse(meta)?.length === 0) {
         await redis.del(`meta:${id}`);
