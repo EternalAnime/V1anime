@@ -1,53 +1,74 @@
-"use server"
-import { ANIME } from "@consumet/extensions";
+import axios from 'axios'
+import { redis } from '@/lib/rediscache';
+import { NextResponse, NextRequest } from "next/server"
 
-const gogo = new ANIME.Gogoanime();
-
-export async function getGogoSources(id) {
+async function consumetEpisode(id) {
     try {
-        const data = await gogo.fetchEpisodeSources(id);
-
-        if (!data) return null;
-
-        return data;
+      const { data } = await axios.get(
+        `${process.env.CONSUMET_URI}/meta/anilist/watch/${id}`
+      );
+      return data;
     } catch (error) {
-        console.log(error);
-        return null;
+      console.error(error);
+      return null;
     }
-}
+  }
 
-export async function getZoroSources(id, provider, episodeid, epnum, subtype) {
+async function zoroEpisode(provider, episodeid, epnum, id, subtype) {
     try {
-        let data;
-        const API = process.env.ZORO_API;
-        if (API) {
-            const res = await fetch(`${API}/anime/episode-srcs?id=${episodeid}&server=vidstreaming&category=${subtype}`);
-            data = await res.json();
-        } else {
-            console.log(episodeid)
-            const resp = await fetch(`https://anify.eltik.cc/sources?providerId=${provider}&watchId=${encodeURIComponent(episodeid)}&episodeNumber=${epnum}&id=${id}&subType=${subtype}`);
-            data = await resp.json();
-        }
-        if (!data) return null;
-
-        return data;
+      const cleanEpisodeId = episodeid.replace("/watch/", "");
+      const { data } = await axios.get(`${process.env.ZORO_URI}/anime/episode-srcs?id=${cleanEpisodeId}&server=vidstreaming&category=${subtype}`);
+    return data;
     } catch (error) {
-        console.log(error);
-        return null;
+      console.error(error);
+      return AnifyEpisode(provider, episodeid, epnum, id, subtype);
     }
-}
-export async function getAnimeSources(id, provider, epid, epnum, subtype) {
+  }
+  
+  async function AnifyEpisode(provider, episodeid, epnum, id, subtype) {
     try {
-        if (provider === "gogoanime") {
-            const data = await getGogoSources(epid);
-            return data;
-        }
-        if (provider === "zoro") {
-            const data = await getZoroSources(id, provider, epid, epnum, subtype)
-            return data;
-        }
+      const { data } = await axios.get(
+        `https://anify.eltik.cc/sources?providerId=${provider}&watchId=${encodeURIComponent(
+          episodeid
+        )}&episodeNumber=${epnum}&id=${id}&subType=${subtype}`
+      );
+      return data;
     } catch (error) {
-        console.log(error);
-        return null;
+      console.error(error);
+      return null;
+    }
+  }
+
+export const POST = async (req,{params}) => {
+  const id = params.epsource[0];
+  const {source, provider, episodeid, episodenum, subtype} = await req.json();
+    // let cacheTime = 25 * 60;
+    // let cached = await redis.get(`source:${params.epid[0]}`);
+
+    // if (cached) {
+    //     const cachedData = JSON.parse(cached);
+    //     return NextResponse.json(cachedData);
+    //   } else {
+    //     const data = await consumetEpisode(params.epid[0]);
+    
+    //     await redis.setex(`source:${params.epid[0]}`, cacheTime, JSON.stringify(data));
+    
+    //     return NextResponse.json(data);
+    //   }
+
+    // console.log(provider,episodeid,episodenum,id,subtype)
+    if (source === "consumet") {
+      const data = await consumetEpisode(episodeid);
+      return NextResponse.json(data);
+    }
+
+    if (source === "anify" && provider === "zoro") {
+      const data = await zoroEpisode(provider, episodeid, episodenum, id, subtype);
+      return NextResponse.json(data);
+    }
+
+    if(source === "anify"){
+      const data = await AnifyEpisode(provider, episodeid, episodenum, id, subtype);
+      return NextResponse.json(data);
     }
 }
