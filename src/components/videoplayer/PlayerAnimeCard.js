@@ -93,8 +93,6 @@ function PlayerAnimeCard({ data, id }) {
         </div>
       ))}
 
-
-
       {id !== 'Recommendations' && data.length > visibleItems && (
         <div className={styles.showButton} onClick={handleShowMore}>
           Show More
