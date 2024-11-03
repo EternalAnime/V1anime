@@ -81,20 +81,16 @@ async function fetchGogoanime(sub, dub) {
   }
 }
 
-// Fetch Zoro episodes with Dub option
+// Fetch episodes from Zoro
 async function fetchZoro(id) {
   try {
-    const { data } = await axios.get(`${process.env.ZORO_URI}/anime/episodes/${id}?dub=true`);
-    
+    const { data } = await axios.get(`${process.env.ZORO_URI}/anime/episodes/${id}`);
     if (!data?.episodes) return [];
 
     const array = [
       {
         providerId: "zoro",
-        episodes: {
-          sub: data?.episodes.filter(ep => !ep.dub), // assuming ep.dub indicates a dubbed episode
-          dub: data?.episodes.filter(ep => ep.dub)    // assuming dub episodes can be filtered this way
-        } 
+        episodes: data?.episodes,
       },
     ];
 
@@ -128,7 +124,7 @@ async function fetchEpisodeMeta(id, available = false) {
 const fetchAndCacheData = async (id, meta, redis, cacheTime, refresh) => {
   let malsync;
   if (id) {
-    malsync = await MalSync(id); // Assuming MalSync function is defined correctly to fetch mappings
+    malsync = await MalSync(id); // Assuming MalSync function is also defined correctly to fetch mappings
   }
   const promises = [];
   
@@ -143,7 +139,7 @@ const fetchAndCacheData = async (id, meta, redis, cacheTime, refresh) => {
     }
   
     if (zorop) {
-      promises.push(fetchZoro(zorop.sub)); // fetch Zoro, which now handles dub
+      promises.push(fetchZoro(zorop.sub));
     } else {
       promises.push(Promise.resolve([]));
     }
