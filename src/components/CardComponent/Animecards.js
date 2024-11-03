@@ -102,7 +102,7 @@ function Animecards({ data, cardid, show=true }) {
                 );
               })
             ) : (
-            cardid === 'Related' ? (
+            cardid === 'Related Anime' ? (
               data?.map((item) => {
                 const anime = {
                   id: item?.node?.id || '',
