@@ -1,6 +1,6 @@
 import { compareTwoStrings } from 'string-similarity'
 
-// Function to find similar titles
+// Function to find similar title
 export function findSimilarTitles(inputTitle, titles) {
   const results = [];
   // Compare inputTitle with each title in the dataset
